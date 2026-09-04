@@ -1,0 +1,60 @@
+{
+  "name": "@easyai/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EasyAI cross-platform local AI workspace.",
+  "main": "src/main/index.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "pnpm --filter @easyai/contracts build && pnpm --filter @easyai/tools build && pnpm --filter @easyai/storage build && pnpm --filter @easyai/channel build && pnpm --filter @easyai/gateway build && pnpm --filter @easyai/agent-core build && pnpm --filter @easyai/orchestrator build && pnpm --filter @easyai/api build && pnpm --filter @easyai/renderer build",
+    "stage": "node scripts/stage.mjs",
+    "package": "pnpm build && pnpm stage && electron-builder --publish never",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "electron": "^37.2.4",
+    "electron-builder": "^24.13.3",
+    "electron-builder-squirrel-windows": "^24.13.3",
+    "typescript": "^5.8.3"
+  },
+  "build": {
+    "appId": "com.easyai.desktop",
+    "productName": "EasyAI",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/main/**",
+      "src/preload/**",
+      "stage/renderer/**",
+      "stage/sqljs/**"
+    ],
+    "extraResources": [
+      {
+        "from": "stage/api",
+        "to": "api"
+      }
+    ],
+    "asar": true,
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    }
+  },
+  "dependencies": {
+    "sql.js": "^1.14.2"
+  }
+}

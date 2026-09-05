@@ -909,12 +909,15 @@ onBeforeUnmount(() => {
             <button class="text-xs text-[var(--muted)]" type="button" @click="membersDockOpen = false">收起</button>
           </div>
           <div class="max-h-72 overflow-y-auto p-2">
-            <button
+            <div
               v-for="employee in members"
               :key="employee.id"
-              class="mb-1.5 flex w-full items-center gap-2 rounded-xl border border-[var(--border)] p-2.5 text-left hover:border-[var(--accent)]"
-              type="button"
+              class="mb-1.5 flex w-full cursor-pointer items-center gap-2 rounded-xl border border-[var(--border)] p-2.5 text-left hover:border-[var(--accent)]"
+              role="button"
+              tabindex="0"
               @click="openMember(employee.id)"
+              @keydown.enter.prevent="openMember(employee.id)"
+              @keydown.space.prevent="openMember(employee.id)"
             >
               <span class="relative grid h-8 w-8 place-items-center rounded-lg text-[10px] font-bold text-white" :style="{ background: employee.color }">
                 {{ employee.initials }}
@@ -931,7 +934,7 @@ onBeforeUnmount(() => {
                 title="移除成员并重新规划"
                 @click="requestRemoveMember(employee.id, $event)"
               >移除</button>
-            </button>
+            </div>
             <div class="relative mt-2">
               <button
                 class="w-full rounded-xl border border-dashed border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--accent)] hover:border-[var(--accent)] disabled:opacity-40"

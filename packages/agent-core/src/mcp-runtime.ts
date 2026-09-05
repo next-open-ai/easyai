@@ -1,8 +1,6 @@
-/**
- * MCP → pi AgentTool adapter using the official Model Context Protocol SDK.
- * Keeps EasyAI's connection contract (http / sse / stdio) while tools are
- * native TypeBox/JSON-Schema AgentTools for pi-agent-core.
- */
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
@@ -47,6 +45,36 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   }
 }
 
+function expandUserPath(value: string): string {
+  const raw = String(value || '');
+  if (raw === '~') return os.homedir();
+  if (raw.startsWith('~/') || raw.startsWith('~\\')) return path.join(os.homedir(), raw.slice(2));
+  return raw;
+}
+
+function prepareStdioLaunch(connection: McpConnection | McpConnectionRuntime) {
+  const command = 'command' in connection ? String(connection.command || '').trim() : '';
+  if (!command) throw new Error('Local MCP requires a command (npx / uvx / custom).');
+  const args = ('args' in connection && Array.isArray(connection.args) ? connection.args.map(String) : []).map(expandUserPath);
+  // Ensure sandbox dirs exist for filesystem-style MCP seeds (e.g. ~/.easyai/mcp-files).
+  for (const arg of args) {
+    if (!arg.includes(`${path.sep}.easyai${path.sep}`) && !arg.endsWith(`${path.sep}.easyai`)) continue;
+    try {
+      fs.mkdirSync(arg, { recursive: true });
+    } catch {
+      /* ignore */
+    }
+  }
+  const env =
+    'env' in connection && connection.env && typeof connection.env === 'object'
+      ? ({ ...process.env, ...connection.env } as Record<string, string>)
+      : ({ ...process.env } as Record<string, string>);
+  if (env.PYTHONUNBUFFERED === undefined) env.PYTHONUNBUFFERED = '1';
+  const cwdRaw = 'cwd' in connection && connection.cwd ? String(connection.cwd) : undefined;
+  const cwd = cwdRaw ? expandUserPath(cwdRaw) : undefined;
+  return { command, args, env, cwd };
+}
+
 export async function connectMcpClient(connection: McpConnection | McpConnectionRuntime): Promise<{
   client: Client;
   close: () => Promise<void>;
@@ -55,14 +83,7 @@ export async function connectMcpClient(connection: McpConnection | McpConnection
   let transport: { close?: () => Promise<void> };
 
   if (isStdio(connection) || connection.transport === 'stdio') {
-    const command = 'command' in connection ? String(connection.command || '').trim() : '';
-    if (!command) throw new Error('Local MCP requires a command (npx / uvx / custom).');
-    const args = 'args' in connection && Array.isArray(connection.args) ? connection.args.map(String) : [];
-    const env = 'env' in connection && connection.env && typeof connection.env === 'object'
-      ? { ...process.env, ...connection.env } as Record<string, string>
-      : { ...process.env } as Record<string, string>;
-    if (env.PYTHONUNBUFFERED === undefined) env.PYTHONUNBUFFERED = '1';
-    const cwd = 'cwd' in connection && connection.cwd ? String(connection.cwd) : undefined;
+    const { command, args, env, cwd } = prepareStdioLaunch(connection);
     const stdio = new StdioClientTransport({ command, args, env, cwd, stderr: 'pipe' });
     transport = stdio;
     await client.connect(stdio);
@@ -129,6 +150,8 @@ export async function loadMcpToolset(
   const tools: AgentTool[] = [];
   const labels: string[] = [];
   const instructionParts: string[] = [];
+  const toolCatalog: string[] = [];
+  const loadErrors: string[] = [];
 
   for (const connection of connections ?? []) {
     if (!connection?.enabled) continue;
@@ -142,8 +165,10 @@ export async function loadMcpToolset(
       closers.push(close);
       const listed = await client.listTools();
       const prefix = sanitizeToolPrefix(connection.name || connection.id);
+      const names: string[] = [];
       for (const tool of listed.tools ?? []) {
         const key = `mcp_${prefix}_${tool.name}`.slice(0, 64);
+        names.push(key);
         tools.push(
           defineAgentTool({
             name: key,
@@ -166,12 +191,24 @@ export async function loadMcpToolset(
         );
       }
       labels.push(connection.name);
+      if (names.length) {
+        toolCatalog.push(`- ${connection.name}: ${names.slice(0, 24).join(', ')}${names.length > 24 ? ` (+${names.length - 24} more)` : ''}`);
+      }
       const instructions = (client as { getInstructions?: () => string | undefined }).getInstructions?.()?.trim()
         || (listed as { instructions?: string }).instructions?.trim();
       if (instructions) instructionParts.push(`MCP 「${connection.name}」使用说明：\n${instructions}`);
-    } catch {
-      // Skip unreachable connectors; the agent can still run with remaining tools.
+    } catch (error) {
+      loadErrors.push(`${connection.name}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  if (toolCatalog.length) {
+    instructionParts.unshift(
+      `Available MCP tools for this run:\n${toolCatalog.join('\n')}`,
+    );
+  }
+  if (loadErrors.length) {
+    instructionParts.push(`MCP connectors that failed to load (unavailable this run):\n${loadErrors.map((item) => `- ${item}`).join('\n')}`);
   }
 
   return {

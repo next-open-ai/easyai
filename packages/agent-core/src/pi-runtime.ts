@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { Agent, type AgentMessage } from '@mariozechner/pi-agent-core';
 import { streamSimple, type AssistantMessage } from '@mariozechner/pi-ai';
-import type { AgentEvent, AgentProfile, AgentSkillRuntime, ModelConfig } from '@easyai/contracts';
+import type { AgentEvent, AgentProfile, AgentSkillRuntime, ModelConfig, RunModelRef, TokenUsage } from '@easyai/contracts';
 import { createSkillExecutionTools, isBusinessDeliverablePath, promoteWorkspaceDeliverablesToProject } from './skill-runtime.js';
 import { createWebSearchTools } from './search-runtime.js';
 import { createKnowledgeTools } from './knowledge-runtime.js';
@@ -157,6 +157,43 @@ function emptyUsage() {
     cacheWrite: 0,
     totalTokens: 0,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+}
+
+function asNonNegInt(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n);
+}
+
+function tokenUsageFromPi(usage: {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  totalTokens?: number;
+}): TokenUsage | null {
+  const inputTokens = asNonNegInt(usage.input);
+  const outputTokens = asNonNegInt(usage.output);
+  const cacheReadTokens = asNonNegInt(usage.cacheRead);
+  const cacheWriteTokens = asNonNegInt(usage.cacheWrite);
+  const totalTokens = asNonNegInt(usage.totalTokens) || inputTokens + outputTokens;
+  if (inputTokens + outputTokens + totalTokens + cacheReadTokens + cacheWriteTokens <= 0) return null;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    ...(cacheReadTokens ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens ? { cacheWriteTokens } : {}),
+  };
+}
+
+function modelRefFromConfig(model: ModelConfig): RunModelRef {
+  return {
+    provider: model.provider,
+    chatModel: model.chatModel,
+    ...(model.baseUrl ? { baseUrl: model.baseUrl } : {}),
+    ...(model.providerLabel ? { providerLabel: model.providerLabel } : {}),
   };
 }
 
@@ -342,6 +379,8 @@ export async function* streamAgentReply(input: {
     let lastToolSucceeded: boolean | undefined;
     let toolTurns = 0;
     let runFailed = false;
+    let usageSteps = 0;
+    const modelRef = modelRefFromConfig(input.model);
     const emittedArtifactPaths = new Set<string>();
 
     const agent = new Agent({
@@ -396,6 +435,18 @@ export async function* streamAgentReply(input: {
         if (assistant.errorMessage) {
           runFailed = true;
           enqueue({ type: 'run.failed', runId, message: friendlyModelError(assistant.errorMessage) });
+        } else {
+          const mapped = tokenUsageFromPi(assistant.usage || emptyUsage());
+          if (mapped) {
+            enqueue({
+              type: 'run.usage',
+              runId,
+              usage: mapped,
+              model: modelRef,
+              stepIndex: usageSteps,
+            });
+            usageSteps += 1;
+          }
         }
         return;
       }

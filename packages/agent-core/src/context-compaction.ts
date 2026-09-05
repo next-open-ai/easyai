@@ -231,6 +231,10 @@ export async function compactAgentContext(input: {
   const tokens = estimateMessageTokens(messages);
   if (!shouldCompact(tokens, contextWindow, settings)) return messages;
 
+  // 提配：刚触达默认压缩点时先继续执行，不中断；仅更接近窗口上限才摘要。
+  const boostCeiling = Math.floor(contextWindow * 0.88);
+  if (tokens < boostCeiling) return messages;
+
   let keptTokens = 0;
   let cut = messages.length;
   for (let i = messages.length - 1; i >= 0; i--) {

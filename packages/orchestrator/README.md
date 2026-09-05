@@ -38,4 +38,10 @@ memory?: {
 - 过程产物 → `~/.easyai/workspaces/<runId>/`
 - 用户可见交付 → 调用 `publish_to_project` 写入 `project.workspacePath`（左侧项目文件树）
 
-详见架构文档 §5.1.2。
+详见 [`docs/design/architecture.md`](../../docs/design/architecture.md) §5.2 与 [`docs/design/project-orchestration.md`](../../docs/design/project-orchestration.md)。
+
+### P2 / P3 补充
+
+- **两阶段规划**：结构 → 目标；协作模板为偏好，不匹配时桌面弹窗建议切换。
+- **事件驱动调度**：审批停车后由 schedule pulse 唤醒；普通批次仍 await 结算。
+- **Attempt 幂等**：`lastAttemptKey = taskId:plan{v}:attempt{n}`，避免同一逻辑 attempt 重复执行。

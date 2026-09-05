@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue';
+import { getServerModelConfig, saveServerModelConfig } from '../services/api.js';
 
 export const providerIds = ['openai', 'anthropic', 'google', 'deepseek', 'qwen', 'ollama', 'openai-compatible'] as const;
 export type ProviderId = (typeof providerIds)[number];
@@ -117,7 +118,6 @@ export const ollamaLibraryCatalog = [
   'llama3.2', 'llama3.1', 'qwen2.5', 'qwen2.5:7b', 'qwen2.5-coder', 'deepseek-r1', 'mistral', 'gemma2', 'phi3', 'codellama',
 ];
 
-const localKey = 'easyai.model-settings';
 const settings = ref<ModelSettings>(emptySettings());
 const loaded = ref(false);
 export const ollamaLocalModelNames = ref<string[]>([]);
@@ -332,7 +332,7 @@ function normalize(value: unknown): ModelSettings {
 
 async function load() {
   if (loaded.value) return;
-  const stored = window.easyaiDesktop ? await window.easyaiDesktop.getModelConfig() : JSON.parse(localStorage.getItem(localKey) || '{}');
+  const stored = window.easyaiDesktop ? await window.easyaiDesktop.getModelConfig() : await getServerModelConfig();
   const before = JSON.stringify(stored ?? {});
   const next = normalize(stored);
   settings.value = next;
@@ -343,7 +343,7 @@ async function load() {
     if (window.easyaiDesktop) {
       try { await window.easyaiDesktop.saveModelConfig(next); } catch { /* ignore */ }
     } else {
-      localStorage.setItem(localKey, after);
+      try { await saveServerModelConfig(next); } catch { /* ignore */ }
     }
   }
 }
@@ -416,7 +416,7 @@ export function useModelConfig() {
     const plainSettings = sanitizeModelSettings(JSON.parse(JSON.stringify(normalize(value))) as ModelSettings);
     settings.value = plainSettings;
     if (window.easyaiDesktop) await window.easyaiDesktop.saveModelConfig(plainSettings);
-    else localStorage.setItem(localKey, JSON.stringify(plainSettings));
+    else await saveServerModelConfig(plainSettings);
   };
 
   const selectChatEndpoint = async (token: string) => {

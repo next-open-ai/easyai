@@ -62,24 +62,71 @@ pnpm build
 pnpm package    # electron-builder installers
 ```
 
-No model credentials are stored or used until you configure a provider in **Settings → Models**. Headless/CI smoke scripts are also provided (see `scripts/*-smoke.mjs` and the design docs).
+For the standalone browser runtime:
+
+```bash
+pnpm build
+pnpm web:start  # start the local web launcher
+```
+
+For the packaged CLI / npm payload:
+
+```bash
+easyai doctor
+easyai init
+easyai start
+```
+
+For Docker build validation:
+
+```bash
+pnpm build
+docker build -t easyai:local .
+```
+
+No model credentials are stored or used until you configure a provider in **Settings → Models**. Headless/CI smoke scripts are also provided (see `scripts/*-smoke.mjs`, `docs/runtime-modes.md`, and `docs/deployment.md`).
+
+## Runtime modes
+
+EasyAI currently supports four runtime shapes with different parity levels:
+
+| Runtime | Entry | Support level | Notes |
+| --- | --- | --- | --- |
+| Desktop | `pnpm dev` / packaged app | Full | Reference experience: Electron IPC, `safeStorage`, native file actions, desktop-managed gateway |
+| Web launcher | `pnpm build && pnpm web:start` | Supported | Runs the built renderer from the local Fastify API; no Electron-only capabilities |
+| npm / CLI | `easyai start` | Supported | Same runtime shape as the web launcher |
+| Docker | root `Dockerfile` | Build-supported | Image build is validated, but runtime parity is still partial |
+
+Current web/npm degradations versus desktop:
+
+- no Electron IPC bridge or native file picker/reveal flows
+- no `safeStorage`; server settings are persisted under `EASYAI_DATA_DIR`
+- asset/project file actions fall back to browser open/download behavior
+- channel/gateway credentials are handled by server-side files instead of the desktop keyring bridge
+
+Current Docker caveat:
+
+- the image packages the same standalone web runtime payload
+- however `apps/api` still binds `127.0.0.1`, so published container ports should not yet be documented as fully equivalent to the local launcher
+
+See [docs/runtime-modes.md](docs/runtime-modes.md) for the full parity matrix and [docs/deployment.md](docs/deployment.md) for deployment notes.
 
 ## Release
 
-Push a SemVer tag such as `v0.1.0`; the release workflow packages and publishes three installers:
+Push a SemVer tag such as `v0.1.0`; the release workflow first re-validates the web runtime + Docker build on Ubuntu, then packages and publishes two installers:
 
 | Platform | Architecture | Installer |
 | --- | --- | --- |
 | macOS | Apple Silicon (arm64) | `.dmg` |
-| macOS | Intel (x64) | `.dmg` |
 | Windows | x64 | NSIS `.exe` |
 
-Linux packaging stays disabled in CI for now (see the workflow comments in `.github/workflows/release.yml`).
+Intel macOS and Linux packaging stay disabled in CI for now (see the workflow comments in `.github/workflows/release.yml`).
 
 ## Documentation
 
 | Language | Index |
 | --- | --- |
+| Runtime / deployment | [runtime modes](docs/runtime-modes.md) · [deployment notes](docs/deployment.md) |
 | 中文 | [docs/design/architecture.md](docs/design/architecture.md) · [docs/design README](docs/design/README.md) · [网关设计](docs/design/gateway-m0.md) (M0) / [M1](docs/design/gateway-m1.md) / [M2](docs/design/gateway-m2.md) |
 | English | See the feature/milestone tables inside the design docs above (deep design notes are currently maintained in Chinese). |
 

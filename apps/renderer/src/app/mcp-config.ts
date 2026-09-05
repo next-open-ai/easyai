@@ -6,7 +6,7 @@ import {
   shouldProbeBaseline,
   type BaselineMcpSeed,
 } from './baseline-mcps.js';
-import { testMcpConnection } from '../services/api.js';
+import { getServerMcpConnections, saveServerMcpConnections, testMcpConnection } from '../services/api.js';
 
 export type McpKind = 'remote' | 'local';
 export type McpTransport = 'http' | 'sse' | 'stdio';
@@ -49,6 +49,10 @@ export type McpUpsertInput = Omit<
 const key = 'capabilities.mcp';
 const connections = ref<McpConnection[]>([]);
 const loaded = ref(false);
+
+function useServerSettings() {
+  return !window.easyaiDesktop;
+}
 
 export function parseArgLines(text: string): string[] {
   return String(text || '')
@@ -279,7 +283,10 @@ export function useMcpConfig() {
   const load = async (options?: { force?: boolean }) => {
     if (loaded.value && !options?.force && connections.value.length > 0) return;
     try {
-      connections.value = normalizeAll(JSON.parse((await readStored(key)) || '[]'));
+      const raw = useServerSettings()
+        ? await getServerMcpConnections()
+        : JSON.parse((await readStored(key)) || '[]');
+      connections.value = normalizeAll(raw);
     } catch {
       if (!loaded.value) connections.value = [];
     }
@@ -288,12 +295,15 @@ export function useMcpConfig() {
   };
 
   const persist = async () => {
-    await writeStored(key, JSON.stringify(connections.value));
+    if (useServerSettings()) await saveServerMcpConnections(connections.value);
+    else await writeStored(key, JSON.stringify(connections.value));
   };
 
   /** Idempotent merge of built-in MCP connectors (does not overwrite user edits). */
   const ensureBaselineMcps = async () => {
-    const seeded = await readStored(MCP_SEED_KEY);
+    const seeded = useServerSettings()
+      ? BASELINE_MCPS.every((seed) => connections.value.some((item) => item.id === seed.id))
+      : Boolean(await readStored(MCP_SEED_KEY));
     let changed = false;
     for (const seed of BASELINE_MCPS) {
       const existing = connections.value.find((item) => item.id === seed.id);
@@ -311,7 +321,7 @@ export function useMcpConfig() {
         /* skip invalid seed */
       }
     }
-    if (!seeded) await writeStored(MCP_SEED_KEY, 'true');
+    if (!seeded && !useServerSettings()) await writeStored(MCP_SEED_KEY, 'true');
     return changed;
   };
 

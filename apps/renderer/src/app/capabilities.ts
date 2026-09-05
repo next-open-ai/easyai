@@ -1,6 +1,12 @@
 import { ref } from 'vue';
 import { BASELINE_CATALOG_SKILLS, isBaselineCatalogSkill } from './baseline-catalog-skills.js';
 import { readStored, writeStored } from './storage.js';
+import {
+  getServerCapabilityPolicies,
+  getServerCapabilitySkills,
+  saveServerCapabilityPolicies,
+  saveServerCapabilitySkills,
+} from '../services/api.js';
 
 export type SkillSource = 'builtin' | 'local' | 'registry';
 export type SkillStatus = 'ready' | 'draft' | 'disabled';
@@ -46,6 +52,10 @@ export const builtinSkills: SkillRecord[] = [
 
 const skills = ref<SkillRecord[]>([]);
 const policies = ref<EmployeeSkillPolicy[]>([]);
+
+function useServerSettings() {
+  return !window.easyaiDesktop;
+}
 
 function parse<T>(raw: string | null, fallback: T): T { try { return raw ? JSON.parse(raw) as T : fallback; } catch { return fallback; } }
 function canonicalName(value: string) { return value.trim().replace(/^['"]|['"]$/g, '').toLowerCase(); }
@@ -109,8 +119,16 @@ function ensureBaselineCatalogSkills(): boolean {
 
 export function useCapabilities() {
   const load = async () => {
-    const seeded = await readStored(seededKey);
-    const restored = parse(await readStored(skillKey), seeded ? [] : builtinSkills);
+    const isServer = useServerSettings();
+    const seeded = isServer
+      ? false
+      : Boolean(await readStored(seededKey));
+    const restoredRaw = isServer
+      ? await getServerCapabilitySkills()
+      : parse(await readStored(skillKey), seeded ? [] : builtinSkills);
+    const restored = Array.isArray(restoredRaw)
+      ? restoredRaw as SkillRecord[]
+      : (seeded ? [] : builtinSkills);
     const unique = new Map<string, SkillRecord>();
     for (const skill of restored) {
       const normalized = {
@@ -124,20 +142,37 @@ export function useCapabilities() {
       if (!current || (current.source === 'registry' && normalized.path)) unique.set(key, normalized);
     }
     skills.value = [...unique.values()];
-    if (skills.value.length !== restored.length) await writeStored(skillKey, JSON.stringify(skills.value));
-    policies.value = parse(await readStored(policyKey), []);
-    if (!seeded) {
+    if (skills.value.length !== restored.length) {
+      if (isServer) await saveServerCapabilitySkills(skills.value);
+      else await writeStored(skillKey, JSON.stringify(skills.value));
+    }
+    const policiesRaw = isServer
+      ? await getServerCapabilityPolicies()
+      : parse(await readStored(policyKey), []);
+    policies.value = Array.isArray(policiesRaw) ? policiesRaw as EmployeeSkillPolicy[] : [];
+    if (!policies.value.length) {
       policies.value = [
         ...builtinSkills.filter((skill) => skill.systemOnly).map((skill) => ({ employeeId: 'administrator', skillId: skill.id, mode: 'default' as PolicyMode, priority: 100, approvalRequired: true })),
         { employeeId: 'general', skillId: 'document-workbench', mode: 'available', priority: 50, approvalRequired: false },
       ];
-      await writeStored(skillKey, JSON.stringify(skills.value));
-      await writeStored(policyKey, JSON.stringify(policies.value));
-      await writeStored(seededKey, 'true');
+      if (isServer) {
+        await saveServerCapabilitySkills(skills.value);
+        await saveServerCapabilityPolicies(policies.value);
+      } else {
+        await writeStored(skillKey, JSON.stringify(skills.value));
+        await writeStored(policyKey, JSON.stringify(policies.value));
+        await writeStored(seededKey, 'true');
+      }
     }
-    if (ensureBaselineCatalogSkills()) await writeStored(skillKey, JSON.stringify(skills.value));
+    if (ensureBaselineCatalogSkills()) {
+      if (isServer) await saveServerCapabilitySkills(skills.value);
+      else await writeStored(skillKey, JSON.stringify(skills.value));
+    }
   };
-  const saveSkills = async () => writeStored(skillKey, JSON.stringify(skills.value));
+  const saveSkills = async () => {
+    if (useServerSettings()) await saveServerCapabilitySkills(skills.value);
+    else await writeStored(skillKey, JSON.stringify(skills.value));
+  };
   const setExecutionPolicy = async (skillId: string, execution: SkillRecord['execution']) => {
     const skill = skills.value.find((item) => item.id === skillId);
     if (!skill) return;
@@ -155,7 +190,10 @@ export function useCapabilities() {
     policies.value = policies.value.filter((policy) => policy.skillId !== id);
     await Promise.all([saveSkills(), savePolicies()]);
   };
-  const savePolicies = async () => writeStored(policyKey, JSON.stringify(policies.value));
+  const savePolicies = async () => {
+    if (useServerSettings()) await saveServerCapabilityPolicies(policies.value);
+    else await writeStored(policyKey, JSON.stringify(policies.value));
+  };
   const policyFor = (employeeId: string, skillId: string) => policies.value.find((item) => item.employeeId === employeeId && item.skillId === skillId);
   const setPolicy = async (employeeId: string, skillId: string, mode: PolicyMode) => {
     const found = policyFor(employeeId, skillId);

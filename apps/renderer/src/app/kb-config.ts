@@ -1,5 +1,11 @@
 import { computed, ref } from 'vue';
 import { readStored, writeStored } from './storage';
+import {
+  getServerKnowledgeBases,
+  getServerKnowledgeProviderConfig,
+  saveServerKnowledgeBases,
+  saveServerKnowledgeProviderConfig,
+} from '../services/api.js';
 
 export const knowledgeProviderIds = ['lancedb', 'bailian', 'dify', 'qdrant', 'pinecone'] as const;
 export type KnowledgeProviderId = (typeof knowledgeProviderIds)[number];
@@ -72,6 +78,10 @@ const bases = ref<KnowledgeBase[]>([]);
 const providerSettings = ref<KnowledgeProviderSettings>(defaultProviderSettings());
 const basesLoaded = ref(false);
 const providersLoaded = ref(false);
+
+function useServerSettings() {
+  return !window.easyaiDesktop;
+}
 
 export function defaultProviderSettings(): KnowledgeProviderSettings {
   return {
@@ -205,7 +215,10 @@ export function useKnowledgeConfig() {
   const loadProviders = async () => {
     if (providersLoaded.value) return;
     try {
-      providerSettings.value = normalizeProviderSettings(JSON.parse((await readStored(providersKey)) || '{}'));
+      const raw = useServerSettings()
+        ? await getServerKnowledgeProviderConfig()
+        : JSON.parse((await readStored(providersKey)) || '{}');
+      providerSettings.value = normalizeProviderSettings(raw);
     } catch {
       providerSettings.value = defaultProviderSettings();
     }
@@ -217,7 +230,8 @@ export function useKnowledgeConfig() {
     const local = next.providers.find((item) => item.id === 'lancedb');
     if (local) local.enabled = true;
     providerSettings.value = next;
-    await writeStored(providersKey, JSON.stringify(next));
+    if (useServerSettings()) await saveServerKnowledgeProviderConfig(next);
+    else await writeStored(providersKey, JSON.stringify(next));
     return next;
   };
 
@@ -225,7 +239,10 @@ export function useKnowledgeConfig() {
     await loadProviders();
     if (basesLoaded.value) return;
     try {
-      bases.value = normalizeAll(JSON.parse((await readStored(basesKey)) || '[]'));
+      const raw = useServerSettings()
+        ? await getServerKnowledgeBases()
+        : JSON.parse((await readStored(basesKey)) || '[]');
+      bases.value = normalizeAll(raw);
     } catch {
       bases.value = [];
     }
@@ -253,14 +270,16 @@ export function useKnowledgeConfig() {
       }
       if (changed) {
         providerSettings.value = { ...providerSettings.value, providers: [...providerSettings.value.providers] };
-        await writeStored(providersKey, JSON.stringify(providerSettings.value));
+        if (useServerSettings()) await saveServerKnowledgeProviderConfig(providerSettings.value);
+        else await writeStored(providersKey, JSON.stringify(providerSettings.value));
       }
     }
     basesLoaded.value = true;
   };
 
   const persist = async () => {
-    await writeStored(basesKey, JSON.stringify(bases.value));
+    if (useServerSettings()) await saveServerKnowledgeBases(bases.value);
+    else await writeStored(basesKey, JSON.stringify(bases.value));
   };
 
   const enabledProviders = computed(() =>

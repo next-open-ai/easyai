@@ -24,6 +24,8 @@ import {
 import { buildDependencyBlock, buildSummaryEvidence, fitObjective } from "../../app/context-budget.js";
 import ProjectConversationWorkspace from "./ProjectConversationWorkspace.vue";
 import * as orch from "../../services/orchestration.js";
+import { isDesktopShell } from "../../app/platform.js";
+import { createManagedWorkspace, materializeWorkspaceAssets, syncWorkspaceRun } from "../../services/api.js";
 
 type Transcript = {
   assistantContent: string;
@@ -84,6 +86,7 @@ function stopManagedPoll(projectId: string) {
   managedPollCounts.delete(projectId);
 }
 const hydratedKeys = new Set<string>();
+const desktopShell = isDesktopShell();
 
 function managedProvider(): ProviderId {
   return props.models[0]?.provider ?? "openai";
@@ -273,7 +276,7 @@ async function hydrateManagedTask(
   }
   if (project.workspacePath && run.id) {
     try {
-      await window.easyaiDesktop?.syncProjectWorkspace(project.workspacePath, run.id);
+      await syncWorkspaceRun(project.workspacePath, run.id);
     } catch {
       /* keep going even if folder sync fails */
     }
@@ -882,10 +885,12 @@ async function confirmCreate() {
     error.value = "请完善项目目标和所有任务。";
     return;
   }
-  const workspacePath = await window.easyaiDesktop?.createProjectWorkspace({
-    name: name.value,
-    parentDirectory: workspaceParent.value || undefined,
-  });
+  const workspacePath = desktopShell && workspaceParent.value
+    ? await window.easyaiDesktop?.createProjectWorkspace({
+      name: name.value,
+      parentDirectory: workspaceParent.value || undefined,
+    })
+    : await createManagedWorkspace(name.value || 'project');
   if (!workspacePath) {
     error.value = "无法创建项目空间目录。";
     return;
@@ -923,6 +928,7 @@ async function confirmCreate() {
   autoStartIfDraft(adopted);
 }
 async function chooseWorkspaceParent() {
+  if (!desktopShell) return;
   const selected = await window.easyaiDesktop?.pickProjectDirectory();
   if (selected) workspaceParent.value = selected;
 }
@@ -1055,9 +1061,13 @@ async function executeTask(project: Project, task: ProjectTask) {
     });
     if (project.workspacePath) {
       const runIds = [...new Set([transcript.runId, ...transcript.assets.map((asset) => asset.runId)].filter((id): id is string => Boolean(id)))];
-      for (const runId of runIds) await window.easyaiDesktop?.syncProjectWorkspace(project.workspacePath, runId);
+      for (const runId of runIds) await syncWorkspaceRun(project.workspacePath, runId);
       if (!runIds.length && transcript.assets.length) {
-        await window.easyaiDesktop?.materializeProjectAssets?.(project.workspacePath, transcript.assets.map((asset) => asset.id));
+        await materializeWorkspaceAssets(project.workspacePath, transcript.assets.map((asset) => ({
+          assetId: asset.id,
+          relativePath: asset.name,
+          name: asset.name,
+        })));
       }
     }
     message.content = transcript.assistantContent;
@@ -1567,12 +1577,15 @@ onBeforeUnmount(() => {
                   <button
                     class="shrink-0 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-semibold hover:border-[var(--accent)]/50"
                     type="button"
+                    :disabled="!desktopShell"
                     @click="chooseWorkspaceParent"
                   >
-                    {{ workspaceParent ? '更换' : '选择目录' }}
+                    {{ !desktopShell ? '仅桌面可选目录' : (workspaceParent ? '更换' : '选择目录') }}
                   </button>
                 </div>
-                <p class="mt-2 text-[11px] text-[var(--muted)]">当前模板：{{ template.name }} · 交付物将写入该目录</p>
+                <p class="mt-2 text-[11px] text-[var(--muted)]">
+                  当前模板：{{ template.name }} · 交付物将写入该目录{{ desktopShell ? '' : '；Web / Docker 默认使用服务端托管项目空间' }}
+                </p>
               </div>
 
               <div class="flex flex-col gap-3 border-t border-[var(--border)] pt-4 sm:flex-row sm:items-end sm:justify-between">
@@ -1725,6 +1738,7 @@ onBeforeUnmount(() => {
             @dispatch="dispatchProjectInstruction(selected!, $event)"
             @add-member="addProjectMember(selected!, $event)"
             @remove-member="removeProjectMember(selected!, $event)"
+            @approve="resolveManagedApproval($event)"
           />
         </section>
 

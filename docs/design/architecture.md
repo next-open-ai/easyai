@@ -49,7 +49,7 @@ EasyAI 是**本地优先的数字员工工作台**：不是单一聊天工具，
 | --- | --- | --- |
 | `apps/desktop/src/main/index.cjs` | 窗口与 IPC；sql.js：`app_kv`(密钥/资产)、`settings.channels.v1`(加密凭证)、资产文件；`storage-get/set` 转发 `/api/orch/kv`；fork 管理 api/gateway；域迁移 | 不执行模型调用 |
 | `apps/renderer` | 全部 UI；组合式 store（无 Pinia）；`services/api.ts`（旧流式 chat）与 `services/orchestration.ts`（/api/orch 客户端 + SSE） | 无 Node/Electron import |
-| `apps/api` | HTTP 编排接口 + 域 KV 代理 + SSE 事件流 | 只 bind 127.0.0.1 |
+| `apps/api` | HTTP 编排接口 + 域 KV 代理 + SSE 事件流 | 当前入口仍只 bind `127.0.0.1`；web launcher 可用，Docker 对外暴露仍有退化 |
 | `apps/gateway` | 通道运行时：`GatewayRuntime`(会话映射/指令面/审批/项目)、适配器(telegram/feishu)、relay 设备链接、配置(KV 或文件) | 凭证不自持（向 Main 索取或显式文件，用于桩/CI） |
 
 ### 渲染层「远程办公/连接」门户（P1）
@@ -204,7 +204,11 @@ API：
 
 - 包顺序（根与 desktop 的 build 脚本）：contracts → tools → storage → **channel → gateway** → agent-core → orchestrator → api → renderer。
 - dev：`apps/desktop/scripts/dev.mjs` 串行构建依赖后起 Vite + Electron（main/preload 变更才重启 Electron）。
-- 发布 CI（`release.yml`）：macOS arm64(macos-14)、macOS Intel x64(macos-13)、Windows x64 三个原生 runner → dmg/dmg/exe；publish 校验恰 3 个安装包并生成 SHA-256。
+- 独立 web launcher：`pnpm build && pnpm web:start`，由 `scripts/start-web.mjs` 通过 `EASYAI_WEB_STATIC_DIR` 把 `apps/renderer/dist` 挂到同一个 Fastify 进程。
+- npm/CLI：`bin/easyai.mjs` 暴露 `doctor` / `init` / `start`，`start` 与 web launcher 走同一运行时形态。
+- Docker：根 `Dockerfile` 打包当前 web runtime 载荷（API/renderer/gateway/channel + `package.docker.json`）；CI 校验镜像可构建，但由于 API 入口仍只 bind `127.0.0.1`，容器对外服务能力尚未与本机 launcher 完全对齐。
+- PR CI（`ci.yml`）：Ubuntu build + web runtime smoke + root Docker build；macOS arm64 与 Windows x64 桌面打包校验。
+- 发布 CI（`release.yml`）：tag 触发后先在 Ubuntu 重新执行 build/web runtime smoke/Docker build，再在 macOS arm64、Windows x64 原生 runner 打包；publish 校验恰 2 个安装包并生成 SHA-256。
 - 无头验收脚本：`scripts/headless-gateway-smoke.mjs`、`remote-project-confirm.mjs`、`remote-chat.mjs`、`gateway-stub-smoke.mjs`、`gateway-feishu-smoke.mjs`、`relay-smoke.mjs`。
 
 ## 8. 验收与状态

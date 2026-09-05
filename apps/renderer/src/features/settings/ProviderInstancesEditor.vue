@@ -12,6 +12,7 @@ import {
 } from '../../app/model-config';
 
 import { useNotify } from '../../app/notify';
+import { testProviderConnection } from '../../services/api.js';
 
 const props = defineProps<{
   instances: ProviderInstance[];
@@ -46,6 +47,14 @@ function addInstance() {
   editingId.value = next.id;
 }
 
+function eventValue(event: Event): string {
+  return (event.target as HTMLInputElement | null)?.value ?? '';
+}
+
+function eventChecked(event: Event): boolean {
+  return Boolean((event.target as HTMLInputElement | null)?.checked);
+}
+
 function removeInstance(id: string) {
   if (!window.confirm('删除该 Provider 连接？关联的已配置模型也会在保存时一并清理。')) return;
   emitInstances(props.instances.filter((item) => item.id !== id));
@@ -56,8 +65,7 @@ async function testInstance(instance: ProviderInstance) {
   testingId.value = instance.id;
   testMessage.value = { ...testMessage.value, [instance.id]: { ok: false, text: t('settings.providerTesting') } };
   try {
-    if (!window.easyaiDesktop?.testProvider) throw new Error(t('notify.error.desktopOnly'));
-    const result = await window.easyaiDesktop.testProvider({
+    const result = await testProviderConnection({
       type: instance.type,
       baseUrl: instance.baseUrl,
       apiKey: instance.apiKey,
@@ -145,7 +153,7 @@ async function testInstance(instance: ProviderInstance) {
               class="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-normal outline-none focus:border-[var(--accent)]"
               type="text"
               :value="instance.name"
-              @input="patch(instance.id, { name: ($event.target as HTMLInputElement).value })"
+              @input="patch(instance.id, { name: eventValue($event) })"
             />
           </label>
           <label class="grid gap-1.5 text-xs font-semibold text-[var(--muted)]">
@@ -155,7 +163,7 @@ async function testInstance(instance: ProviderInstance) {
               type="text"
               :placeholder="defaultBaseUrl[instance.type] || t('settings.baseUrlHint')"
               :value="instance.baseUrl"
-              @input="patch(instance.id, { baseUrl: ($event.target as HTMLInputElement).value })"
+              @input="patch(instance.id, { baseUrl: eventValue($event) })"
             />
           </label>
           <label v-if="providerNeedsApiKey(instance.type)" class="grid gap-1.5 text-xs font-semibold text-[var(--muted)]">
@@ -166,7 +174,7 @@ async function testInstance(instance: ProviderInstance) {
               autocomplete="off"
               placeholder="sk-…"
               :value="instance.apiKey"
-              @input="patch(instance.id, { apiKey: ($event.target as HTMLInputElement).value })"
+              @input="patch(instance.id, { apiKey: eventValue($event) })"
             />
           </label>
           <p v-else class="text-xs text-[var(--muted)]">{{ t('settings.ollamaKeyHint') }}</p>
@@ -175,7 +183,7 @@ async function testInstance(instance: ProviderInstance) {
               class="mt-0.5"
               type="checkbox"
               :checked="instance.disableThinking"
-              @change="patch(instance.id, { disableThinking: ($event.target as HTMLInputElement).checked })"
+              @change="patch(instance.id, { disableThinking: eventChecked($event) })"
             />
             <span>
               <strong class="font-semibold text-[var(--text)]">{{ t('settings.disableThinking') }}</strong>

@@ -62,24 +62,71 @@ pnpm build
 pnpm package    # electron-builder 打安装包
 ```
 
-在“设置 → 模型”配置 Provider 之前不会存储/使用任何模型密钥。无头/CI 冒烟脚本见 `scripts/*-smoke.mjs` 与设计文档。
+如需启动独立 Web 运行时：
+
+```bash
+pnpm build
+pnpm web:start  # 启动本地 web launcher
+```
+
+如需验证 npm/CLI 入口：
+
+```bash
+easyai doctor
+easyai init
+easyai start
+```
+
+如需校验根 Dockerfile：
+
+```bash
+pnpm build
+docker build -t easyai:local .
+```
+
+在“设置 → 模型”配置 Provider 之前不会存储/使用任何模型密钥。无头/CI 冒烟脚本见 `scripts/*-smoke.mjs`、`docs/runtime-modes.md` 与 `docs/deployment.md`。
+
+## 运行形态
+
+EasyAI 当前有 4 种实际运行形态，但能力并不完全等价：
+
+| 运行形态 | 入口 | 支持级别 | 说明 |
+| --- | --- | --- | --- |
+| Desktop | `pnpm dev` / 安装包 | 完整 | 参考形态：Electron IPC、`safeStorage`、原生文件操作、桌面托管 gateway |
+| Web launcher | `pnpm build && pnpm web:start` | 已支持 | 由本地 Fastify API 托管构建后的前端，不含 Electron 专属能力 |
+| npm / CLI | `easyai start` | 已支持 | 与 web launcher 是同一运行时形态 |
+| Docker | 根 `Dockerfile` | 支持构建校验 | 镜像构建已纳入校验，但运行时对齐仍不完整 |
+
+当前 Web/npm 相对桌面的退化行为：
+
+- 没有 Electron IPC 桥，也没有原生目录选择/文件 reveal 能力
+- 没有 `safeStorage`；模型、搜索、MCP、知识库、通道等设置改为落在 `EASYAI_DATA_DIR` 下的本地 JSON
+- 资产与项目文件操作会退化为浏览器打开/下载
+- 通道 / gateway 凭证链路不再走桌面 keyring，而是走服务端文件存储
+
+当前 Docker 的额外限制：
+
+- 镜像打进去的是与 npm/web launcher 相同的独立运行时载荷
+- 但 `apps/api` 当前仍固定监听 `127.0.0.1`，因此容器端口暴露还不能宣称与本机 launcher 完全等价
+
+完整对齐矩阵见 [docs/runtime-modes.md](docs/runtime-modes.md)，部署说明见 [docs/deployment.md](docs/deployment.md)。
 
 ## 发布
 
-推送形如 `v0.1.0` 的 SemVer tag 触发发布工作流，产出三种安装包：
+推送形如 `v0.1.0` 的 SemVer tag 会先在 Ubuntu 重新校验 Web 运行时与 Docker build，再打包并发布两种安装包：
 
 | 平台 | 架构 | 安装包 |
 | --- | --- | --- |
 | macOS | Apple Silicon (arm64) | `.dmg` |
-| macOS | Intel (x64) | `.dmg` |
 | Windows | x64 | NSIS `.exe` |
 
-Linux 打包暂在 CI 停用（细节见 `.github/workflows/release.yml` 注释）。
+Intel macOS 与 Linux 打包暂在 CI 停用（细节见 `.github/workflows/release.yml` 注释）。
 
 ## 文档导航
 
 | 语言/主题 | 入口 |
 | --- | --- |
+| 运行时 / 部署 | [runtime-modes](docs/runtime-modes.md) · [deployment](docs/deployment.md) |
 | 架构与模块 | [docs/design/architecture.md](docs/design/architecture.md)（当前权威） |
 | 设计文档索引与状态 | [docs/design/README.md](docs/design/README.md) |
 | 通道网关里程碑 | [M0](docs/design/gateway-m0.md) · [M0 验收清单](docs/design/gateway-m0-acceptance.md) · [M1](docs/design/gateway-m1.md) · [M2](docs/design/gateway-m2.md) |

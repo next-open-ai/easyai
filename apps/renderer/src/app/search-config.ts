@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue';
+import { getServerSearchConfig, saveServerSearchConfig } from '../services/api.js';
 
 export const searchProviderIds = ['bocha', 'tavily', 'brave', 'exa', 'zhipu', 'aliyun'] as const;
 export type SearchProviderId = (typeof searchProviderIds)[number];
@@ -17,8 +18,8 @@ function normalize(value: unknown): SearchSettings {
 }
 export function useSearchConfig() {
   const configuredProviders = computed(() => settings.value.providers.filter((item) => item.enabled && item.apiKey.trim()));
-  const load = async () => { if (loaded.value) return; const value = window.easyaiDesktop ? await window.easyaiDesktop.getSearchConfig() : JSON.parse(localStorage.getItem('easyai.search-settings') || '{}'); settings.value = normalize(value); loaded.value = true; };
-  const save = async (value = settings.value) => { const next = normalize(JSON.parse(JSON.stringify(value))); settings.value = next; if (window.easyaiDesktop) await window.easyaiDesktop.saveSearchConfig(next); else localStorage.setItem('easyai.search-settings', JSON.stringify(next)); };
+  const load = async () => { if (loaded.value) return; const value = window.easyaiDesktop ? await window.easyaiDesktop.getSearchConfig() : await getServerSearchConfig(); settings.value = normalize(value); loaded.value = true; };
+  const save = async (value = settings.value) => { const next = normalize(JSON.parse(JSON.stringify(value))); settings.value = next; if (window.easyaiDesktop) await window.easyaiDesktop.saveSearchConfig(next); else await saveServerSearchConfig(next); };
   const runtimeProviders = (preferredOverride?: SearchProviderId | 'auto' | null) => {
     const rows = configuredProviders.value.map(({ id, label, apiKey, baseUrl, enabled }) => ({
       id,

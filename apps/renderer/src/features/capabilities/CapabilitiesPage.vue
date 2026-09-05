@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
 import { useI18n } from '../../app/i18n';
 import { defaultSkillExecution, isBaselineCatalogSkill, useCapabilities, type SkillRecord, type SkillSource } from '../../app/capabilities';
-import { streamChat } from '../../services/api';
+import { deleteManagedSkill, discoverSkills, importGitSkill, importSkillZip, installSkillPackage, readSkillFile, streamChat, writeSkillDraft } from '../../services/api';
 import { useModelConfig, toModelPayload } from '../../app/model-config';
 import SkillAuthoringList from './SkillAuthoringList.vue';
 import McpConnectorsPanel from './McpConnectorsPanel.vue';
@@ -14,6 +14,13 @@ const domain = ref<'skills' | 'mcp'>('skills');
 const tab = ref<'catalog' | 'discover' | 'create'>('catalog');
 const query = ref(''); const categoryFilter = ref('all'); const discoverQuery = ref(''); const results = ref<RegistrySkill[]>([]); const searching = ref(false); const searchError = ref(''); const selected = ref<RegistrySkill | null>(null); const libraryDetail = ref<SkillRecord | null>(null); const executionHosts = ref(''); const editingSkill = ref<SkillRecord | null>(null); const editorInitialContent = ref(''); const editorInitialRequest = ref(''); const packageRef = ref(''); const gitState = ref(''); const importingGit = ref(false); const creatorOpen = ref(false); const creatorBusy = ref(false); const creatorError = ref(''); const creatorReply = ref(''); const creatorRequest = ref(''); const newSkillName = ref(''); const newSkillDescription = ref(''); const existingSkillId = ref('new'); const draft = ref<{ name: string; content: string } | null>(null);
 const installProgress = ref<{ name: string; label: string; percent: number } | null>(null);
+const importManifestText = ref('');
+const zipInput = ref<HTMLInputElement | null>(null);
+const desktopBridge = globalThis as typeof globalThis & {
+  easyaiDesktop?: {
+    pickSkill?: () => Promise<{ path: string; content: string } | null>;
+  };
+};
 
 function switchDomain(next: 'skills' | 'mcp') {
   domain.value = next;
@@ -72,15 +79,55 @@ function canonical(value: string) { return value.trim().replace(/^['"]|['"]$/g, 
 function manifestToSkill(manifest: { path: string; content: string }, source: SkillRecord['source']): SkillRecord | null { const block = manifest.content.match(/^---\r?\n([\s\S]*?)\r?\n---/); if (!block) return null; const field = (name: string) => block[1].match(new RegExp(`^${name}:\\s*(.+)$`, 'm'))?.[1]?.trim().replace(/^['"]|['"]$/g, ''); const name = field('name'); const description = field('description'); return name && description ? { id: `${source}:${canonical(name)}`, name, description, source, status: 'ready', risk: 'low', path: manifest.path, tags: [source], execution: defaultSkillExecution() } : null; }
 async function upsert(skill: SkillRecord) { const index = skills.value.findIndex((item) => item.source !== 'builtin' && canonical(item.name) === canonical(skill.name)); if (index >= 0) skills.value[index] = { ...skills.value[index], ...skill, id: skills.value[index].id }; else skills.value.push(skill); await saveSkills(); }
 async function refresh() { await load(); }
-async function discover() { if (discoverQuery.value.trim().length < 2) return; searching.value = true; searchError.value = ''; results.value = []; try { results.value = (await window.easyaiDesktop?.findSkills(discoverQuery.value.trim(), 3))?.items ?? []; if (!results.value.length) searchError.value = t('capabilities.noResults'); } catch (error) { searchError.value = error instanceof Error ? error.message : String(error); } finally { searching.value = false; } }
-async function importLocal() { const manifest = await window.easyaiDesktop?.pickSkill(); if (!manifest) return; const skill = manifestToSkill(manifest, 'local'); if (!skill) { gitState.value = t('capabilities.invalidManifest'); return; } await upsert(skill); gitState.value = t('capabilities.localImported'); }
+function isDesktopShell() { return Boolean(desktopBridge.easyaiDesktop); }
+async function discover() { if (discoverQuery.value.trim().length < 2) return; searching.value = true; searchError.value = ''; results.value = []; try { results.value = (await discoverSkills(discoverQuery.value.trim())).items ?? []; if (!results.value.length) searchError.value = t('capabilities.noResults'); } catch (error) { searchError.value = error instanceof Error ? error.message : String(error); } finally { searching.value = false; } }
+async function importLocal() { const manifest = await desktopBridge.easyaiDesktop?.pickSkill?.(); if (!manifest) return; const skill = manifestToSkill(manifest, 'local'); if (!skill) { gitState.value = t('capabilities.invalidManifest'); return; } await upsert(skill); gitState.value = t('capabilities.localImported'); }
+async function importPastedSkill() {
+  const content = importManifestText.value.trim();
+  if (!content) return;
+  const parsed = manifestToSkill({ path: '', content }, 'local');
+  if (!parsed) {
+    gitState.value = t('capabilities.invalidManifest');
+    return;
+  }
+  const saved = await writeSkillDraft({ name: canonical(parsed.name), content });
+  await upsert({ ...parsed, path: saved.path });
+  importManifestText.value = '';
+  gitState.value = t('capabilities.localImported');
+}
+async function importZipFile(file: File) {
+  gitState.value = '正在上传并导入 Skill zip…';
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  const chunk = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+  }
+  const result = await importSkillZip({ filename: file.name, base64: btoa(binary) });
+  const skill = result.manifest ? manifestToSkill(result.manifest, 'local') : null;
+  if (!skill) throw new Error(t('capabilities.invalidManifest'));
+  await upsert(skill);
+  gitState.value = `已导入 ${result.importedFiles} 个文件：${skill.name}`;
+}
+async function handleZipPicked(event: Event) {
+  const input = event.target as HTMLInputElement | null;
+  const file = input?.files?.[0];
+  if (!file) return;
+  try {
+    await importZipFile(file);
+  } catch (error) {
+    gitState.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    if (input) input.value = '';
+  }
+}
 async function importGit() {
   if (!packageRef.value.trim() || importingGit.value) return;
   importingGit.value = true;
   gitState.value = t('capabilities.gitImporting');
   try {
     await runInstallProgress(packageRef.value.trim(), async () => {
-      const result = await window.easyaiDesktop?.importGitSkill(packageRef.value.trim());
+      const result = await importGitSkill(packageRef.value.trim());
       for (const manifest of result?.manifests ?? []) {
         const skill = manifestToSkill(manifest, 'local');
         if (skill) await upsert(skill);
@@ -108,7 +155,7 @@ async function createWithAdministrator() {
   try {
     let existing = '';
     const target = skills.value.find((skill) => skill.id === existingSkillId.value);
-    if (target?.path) existing = (await window.easyaiDesktop?.readSkillDraft(target.path))?.content || '';
+    if (target?.path) existing = (await readSkillFile(target.path)).content || '';
     const prompt = `You are EasyAI's System Administrator. Apply Skill Creator principles: understand concrete use, keep instructions concise, use progressive disclosure, and use lowercase hyphen name. Return ONLY JSON {"name":"...","content":"full SKILL.md"}. SKILL.md frontmatter must only include name and description. Request: ${creatorRequest.value}${existing ? `\nExisting skill:\n${existing}` : ''}`;
     await streamChat({ profile: { id: 'administrator', name: 'System Administrator', toolIds: ['skill-authoring'], instructions: 'Create safe, concise skills.' }, messages: [{ role: 'user', content: prompt }], model: toModelPayload(activeConfig.value) }, (delta) => { creatorReply.value += delta; });
     draft.value = parseDraft(creatorReply.value);
@@ -147,7 +194,7 @@ async function installSelected() {
   const target = selected.value;
   try {
     await runInstallProgress(target.name, async () => {
-      const response = await window.easyaiDesktop?.installSkill(target.reference);
+      const response = await installSkillPackage(target.reference);
       const skill = response?.manifest
         ? manifestToSkill(response.manifest, 'registry')
         : {
@@ -169,7 +216,7 @@ async function installSelected() {
   }
 }
 
-async function deleteSkill(skill: SkillRecord | null) { if (!skill) return; if (window.confirm(t('capabilities.deleteConfirm', { name: skill.name }))) { if (skill.path) await window.easyaiDesktop?.deleteManagedSkill(skill.path); await removeSkill(skill.id); libraryDetail.value = null; } }
+async function deleteSkill(skill: SkillRecord | null) { if (!skill) return; if (window.confirm(t('capabilities.deleteConfirm', { name: skill.name }))) { if (skill.path) await deleteManagedSkill(skill.path); await removeSkill(skill.id); libraryDetail.value = null; } }
 function openLibraryDetail(skill: SkillRecord) { skill.execution ??= defaultSkillExecution(); libraryDetail.value = skill; executionHosts.value = skill.execution.allowedNetworkHosts.join(', '); }
 function isCatalogBuiltin(skill: SkillRecord) {
   return skill.source === 'builtin' || isBaselineCatalogSkill(skill.id);
@@ -451,8 +498,19 @@ onMounted(() => { void refresh(); void loadModels(); });
         <div class="mt-6 grid gap-3 md:grid-cols-2">
           <article class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <h3 class="text-sm font-bold">{{ t('capabilities.importLocalTitle') }}</h3>
-            <p class="mt-1 text-xs text-[var(--muted)]">{{ t('capabilities.importLocalHelp') }}</p>
-            <button class="mt-3 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold" @click="importLocal">{{ t('capabilities.importSkill') }}</button>
+            <p class="mt-1 text-xs text-[var(--muted)]">推荐上传完整 Skill 目录的 `.zip` 包，这样会连同 `scripts/`、`references/`、`assets/` 一起导入。仅导入 `SKILL.md` 适合临时草稿，不适合完整 Skill 包。</p>
+            <input ref="zipInput" class="hidden" type="file" accept=".zip,application/zip" @change="handleZipPicked" />
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button class="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold" @click="zipInput?.click()">上传 Skill zip 包</button>
+              <button class="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold disabled:opacity-50" :disabled="!isDesktopShell()" @click="importLocal">仅导入 SKILL.md</button>
+            </div>
+            <p class="mt-2 text-[11px] text-[var(--muted)]">如果只有一个 `SKILL.md` 草稿，没有 zip 包，也可以在下方直接粘贴 manifest 内容。</p>
+            <div v-if="!isDesktopShell()" class="mt-3 grid gap-2">
+              <textarea v-model="importManifestText" rows="8" class="w-full rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-xs font-mono" placeholder="粘贴完整 SKILL.md 内容（含 --- frontmatter ---）" />
+              <button class="justify-self-start rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold disabled:opacity-50" :disabled="!importManifestText.trim()" @click="importPastedSkill">
+                直接导入粘贴的 SKILL.md
+              </button>
+            </div>
           </article>
           <article class="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <h3 class="text-sm font-bold">{{ t('capabilities.importGitTitle') }}</h3>

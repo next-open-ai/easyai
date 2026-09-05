@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { getHealth } from '../services/api';
 import AppSidebar from './AppSidebar.vue';
 import ChatWorkspace from '../features/chat/ChatWorkspace.vue';
@@ -40,6 +40,10 @@ const { load: loadSearchConfig } = useSearchConfig();
 const { load: loadMcpConfig, probeStartupMcps } = useMcpConfig();
 const notify = useNotify();
 const showEnvCheckDialog = ref(false);
+const activeChatEmployee = computed(() =>
+  (activeConversation.value && employees.value.find((item) => item.id === activeConversation.value?.employeeId))
+  || currentEmployee.value,
+);
 let stopScheduler: (() => void) | undefined;
 const runScheduledAutomation = async (automation: Automation) => {
   const model = (automation.modelId ? modelById(automation.modelId) : undefined) ?? modelForProvider(automation.provider);
@@ -133,7 +137,7 @@ function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value; voi
   <div class="flex h-screen min-h-[600px] overflow-hidden bg-[var(--background)] text-[var(--text)]">
     <AppSidebar :collapsed="sidebarCollapsed" :view="view" :conversations="conversations" :active-conversation-id="activeConversation?.id ?? null" :service-ready="serviceReady" @toggle="toggleSidebar" @navigate="setView" @new-chat="startChat()" @select-conversation="selectConversation" @delete-conversation="deleteConversation" />
     <main :class="['relative min-w-0 flex-1 bg-[var(--background)]', view === 'chat' || view === 'capabilities' || view === 'knowledge' || view === 'assets' || view === 'automations' || view === 'projects' ? 'overflow-hidden' : 'overflow-auto']">
-      <ChatWorkspace v-if="view === 'chat'" :employee="(activeConversation && employees.find((item) => item.id === activeConversation.employeeId)) || currentEmployee" :selected-employee-id="activeConversation?.employeeId || currentEmployeeId" :employees="employees" :conversation="activeConversation" :model-configured="configured" :model="modelConfig" :available-models="availableChatModels" :chat-endpoint-token="chatEndpointToken" :permission-tier="permissionTier" :send-message="async (content, collaboratorIds, collaborationDelivery, onlineSearch) => { await addMessage(content, modelConfig, { collaboratorIds, collaborationDelivery, onlineSearch }); }" :abort-message="() => { abortActiveRun(); }" :approve="(conversationId, approval, scope) => approveAndRetry(conversationId, approval, scope, modelConfig)" @select-endpoint="selectChatEndpoint" @select-employee="startChat" @set-permission-tier="setPermissionTier" @clear-conversation="clearConversation" @open-assets="setView('assets')" @open-settings="setView('settings')" />
+      <ChatWorkspace v-if="view === 'chat'" :employee="activeChatEmployee" :selected-employee-id="activeConversation?.employeeId || currentEmployeeId" :employees="employees" :conversation="activeConversation" :model-configured="configured" :model="modelConfig" :available-models="availableChatModels" :chat-endpoint-token="chatEndpointToken" :permission-tier="permissionTier" :send-message="async (content, collaboratorIds, collaborationDelivery, onlineSearch) => { await addMessage(content, modelConfig, { collaboratorIds, collaborationDelivery, onlineSearch }); }" :abort-message="() => { abortActiveRun(); }" :approve="(conversationId, approval, scope) => approveAndRetry(conversationId, approval, scope, modelConfig)" @select-endpoint="selectChatEndpoint" @select-employee="startChat" @set-permission-tier="setPermissionTier" @clear-conversation="clearConversation" @open-assets="setView('assets')" @open-settings="setView('settings')" />
       <EmployeesPage
         v-else-if="view === 'employees'"
         :employees="employees"

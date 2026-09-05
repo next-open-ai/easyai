@@ -7,6 +7,8 @@
 
 | 文档 | 内容 | 状态 |
 | --- | --- | --- |
+| [../runtime-modes.md](../runtime-modes.md) | Desktop / web launcher / npm / Docker 运行形态对齐矩阵与退化说明 | ✅ 当前权威 |
+| [../deployment.md](../deployment.md) | 本地 web launcher、npm CLI、Docker build 与 CI 期望 | ✅ 当前权威 |
 | [architecture.md](architecture.md) | 当前项目架构 / 进程与模块边界 / 主要逻辑（会话·滚动记忆·可续跑审批·**Plan/Run/ChangeSet 项目编排**·存储 keyring·通道） | ✅ 当前权威 |
 | [project-orchestration.md](project-orchestration.md) | 项目 Plan/Run/ChangeSet 数据模型与调度约定（P0–P1） | ✅ |
 | [gateway-m0.md](gateway-m0.md) | M0：编排层下沉、域存储单写者、可续跑 run、`/api/orch` REST/SSE 接口表 | ✅ |
@@ -17,7 +19,7 @@
 ## 修订约定
 
 1. 改变核心业务行为时，先改 `architecture.md` 对应小节，再在对应里程碑文档补记录；
-2. 发布/验收门槛变化时同步更新相关「验收」表与 `README(.zh-CN).md` 的状态行；
+2. 发布/验收门槛变化时同步更新相关「验收」表、`README(.zh-CN).md`，以及 `runtime-modes.md` / `deployment.md`；
 3. 旧的早期文档（`docs/architecture/overview.md`、`docs/sdd/*`）保留为历史参考，与本文档冲突时以本文档为准。
 
 ## 验收脚本索引（无头/桩）

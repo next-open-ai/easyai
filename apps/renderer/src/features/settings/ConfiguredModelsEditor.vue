@@ -12,6 +12,7 @@ import {
   type ModelCapability,
   type ProviderInstance,
 } from '../../app/model-config';
+import { listProviderModels } from '../../services/api.js';
 
 const props = defineProps<{
   instances: ProviderInstance[];
@@ -130,14 +131,17 @@ function modelSupportsBuiltinToggle(model: ConfiguredModel) {
   return model.capability === 'chat' && Boolean(instance && providerCanBuiltinWebSearch(instance.type));
 }
 
+function eventChecked(event: Event): boolean {
+  return Boolean((event.target as HTMLInputElement | null)?.checked);
+}
+
 async function fetchRemoteModels() {
   const instance = draftInstance.value;
   if (!instance) return;
   remoteLoading.value = true;
   remoteError.value = '';
   try {
-    if (!window.easyaiDesktop?.listProviderModels) throw new Error('仅桌面端支持拉取模型列表');
-    remoteModels.value = await window.easyaiDesktop.listProviderModels({
+    remoteModels.value = await listProviderModels({
       type: instance.type,
       baseUrl: instance.baseUrl,
       apiKey: instance.apiKey,
@@ -208,7 +212,7 @@ function modelRowLabel(model: ConfiguredModel) {
           <input
             :checked="Boolean(model.supportsBuiltinWebSearch)"
             type="checkbox"
-            @change="toggleBuiltinWebSearch(model, ($event.target as HTMLInputElement).checked)"
+            @change="toggleBuiltinWebSearch(model, eventChecked($event))"
           />
           <span class="text-[var(--muted)]">{{ t('settings.builtinSearch') }}</span>
         </label>

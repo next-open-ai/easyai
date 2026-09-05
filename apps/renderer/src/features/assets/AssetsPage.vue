@@ -12,6 +12,8 @@ import {
 } from '../../app/project-files';
 import type { Conversation } from '../../app/workspace';
 import AssetPreviewPane from './AssetPreviewPane.vue';
+import { listWorkspaceFiles, readArchivedAssetPreview, readWorkspacePreview } from '../../services/api.js';
+import { copyableAssetUrl, copyableWorkspaceFileUrl, downloadAssetBestEffort, downloadWorkspaceFileBestEffort, openAssetBestEffort, openWorkspaceFileBestEffort, previewAssetUrl, previewWorkspaceFileUrl, revealAssetBestEffort, revealWorkspaceFileBestEffort } from '../../app/platform-actions.js';
 
 const props = defineProps<{ conversations: Conversation[] }>();
 const emit = defineEmits<{
@@ -251,10 +253,10 @@ function clearPreview() {
 async function loadProjectTree() {
   const project = selectedProject.value;
   treeEntries.value = [];
-  if (!project?.workspacePath || !window.easyaiDesktop) return;
+  if (!project?.workspacePath) return;
   treeLoading.value = true;
   try {
-    treeEntries.value = await window.easyaiDesktop.listProjectFiles(project.workspacePath);
+    treeEntries.value = await listWorkspaceFiles(project.workspacePath);
   } catch (error) {
     previewError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -273,17 +275,16 @@ async function selectTreeEntry(entry: ProjectFileEntry) {
 async function loadProjectPreview() {
   clearPreview();
   const project = selectedProject.value;
-  if (!project?.workspacePath || !selectedRelative.value || !window.easyaiDesktop) return;
+  if (!project?.workspacePath || !selectedRelative.value) return;
   previewLoading.value = true;
   previewTitle.value = selectedRelative.value;
   previewKind.value = previewKindForName(selectedRelative.value);
   previewMeta.value = [`${project.name} · 本地项目`, project.workspacePath];
   try {
     if (previewKind.value === 'html' || previewKind.value === 'pdf') {
-      const registered = await window.easyaiDesktop.registerPreviewRoot(project.workspacePath);
-      previewHtmlUrl.value = `${registered.origin}/${selectedRelative.value.split('/').map(encodeURIComponent).join('/')}`;
+      previewHtmlUrl.value = await previewWorkspaceFileUrl(project.workspacePath, selectedRelative.value);
     } else {
-      const payload = await window.easyaiDesktop.readProjectPreview(project.workspacePath, selectedRelative.value);
+      const payload = await readWorkspacePreview(project.workspacePath, selectedRelative.value);
       previewMeta.value = [`${project.name} · 本地项目`, formatBytes(payload.bytes)];
       if (previewKind.value === 'image') {
         if (payload.base64) {
@@ -310,7 +311,7 @@ async function loadProjectPreview() {
 async function loadArchivePreview() {
   clearPreview();
   const asset = selectedAsset.value;
-  if (!asset || !window.easyaiDesktop) return;
+  if (!asset) return;
   previewLoading.value = true;
   previewTitle.value = asset.name;
   previewKind.value = previewKindForName(asset.name);
@@ -321,10 +322,9 @@ async function loadArchivePreview() {
   ];
   try {
     if (previewKind.value === 'html' || previewKind.value === 'pdf') {
-      const registered = await window.easyaiDesktop.registerAssetPreviewRoot(asset.id);
-      previewHtmlUrl.value = `${registered.origin}/${encodeURIComponent(asset.name)}`;
+      previewHtmlUrl.value = await previewAssetUrl(asset.id, asset.name);
     } else {
-      const payload = await window.easyaiDesktop.readAssetPreview(asset.id);
+      const payload = await readArchivedAssetPreview(asset.id);
       if (previewKind.value === 'image') {
         if (payload.base64) {
           previewImageUrl.value = `data:${payload.mimeType || imageMime(payload.name)};base64,${payload.base64}`;
@@ -355,27 +355,35 @@ async function refreshCurrent() {
 
 async function revealCurrent() {
   if (mode.value === 'projects' && selectedProject.value?.workspacePath && selectedRelative.value) {
-    await window.easyaiDesktop?.revealProjectFile(selectedProject.value.workspacePath, selectedRelative.value);
+    if (await revealWorkspaceFileBestEffort(selectedProject.value.workspacePath, selectedRelative.value)) return;
+    await copyText('project-link', copyableWorkspaceFileUrl(selectedProject.value.workspacePath, selectedRelative.value));
     return;
   }
-  if (selectedAsset.value) await window.easyaiDesktop?.revealAsset(selectedAsset.value.id);
+  if (selectedAsset.value) {
+    if (await revealAssetBestEffort(selectedAsset.value.id)) return;
+    await copyText('asset-link', copyableAssetUrl(selectedAsset.value.id));
+  }
 }
 
 async function downloadCurrent() {
   if (mode.value === 'archive' && selectedAsset.value) {
-    await window.easyaiDesktop?.saveAsset(selectedAsset.value.id);
+    await downloadAssetBestEffort(selectedAsset.value.id);
     return;
   }
-  await revealCurrent();
+  if (mode.value === 'projects' && selectedProject.value?.workspacePath && selectedRelative.value) {
+    await downloadWorkspaceFileBestEffort(selectedProject.value.workspacePath, selectedRelative.value);
+  }
 }
 
 async function openInBrowser() {
   try {
     if (mode.value === 'projects' && selectedProject.value?.workspacePath && selectedRelative.value) {
-      await window.easyaiDesktop?.openProjectFileInBrowser(selectedProject.value.workspacePath, selectedRelative.value);
+      await openWorkspaceFileBestEffort(selectedProject.value.workspacePath, selectedRelative.value);
       return;
     }
-    if (selectedAsset.value) await window.easyaiDesktop?.openAssetInBrowser(selectedAsset.value.id);
+    if (selectedAsset.value) {
+      await openAssetBestEffort(selectedAsset.value.id);
+    }
   } catch (error) {
     previewError.value = error instanceof Error ? error.message : String(error);
   }

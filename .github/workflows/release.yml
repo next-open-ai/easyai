@@ -9,7 +9,95 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Corepack (uses packageManager-pinned pnpm)
+        run: corepack enable
+      - name: Verify pnpm version
+        run: pnpm --version
+      - name: Validate release tag
+        shell: bash
+        run: |
+          [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build workspace
+        run: pnpm build
+      - name: Prepare smoke secrets
+        run: |
+          mkdir -p .tmp
+          cat > .tmp/smoke-secrets.json <<'EOF'
+          {
+            "model": {
+              "providerInstances": [
+                {
+                  "id": "smoke-ollama",
+                  "type": "ollama",
+                  "name": "Smoke Ollama",
+                  "baseUrl": "http://127.0.0.1:11434"
+                }
+              ],
+              "models": [
+                {
+                  "id": "smoke-model",
+                  "providerInstanceId": "smoke-ollama",
+                  "chatModel": "smoke"
+                }
+              ],
+              "activeChatModelId": "smoke-model"
+            },
+            "search": {
+              "version": 1,
+              "defaultProvider": "auto",
+              "providers": []
+            }
+          }
+          EOF
+      - name: Start web runtime
+        shell: bash
+        run: |
+          mkdir -p .tmp/smoke-data
+          EASYAI_ORCH_RUNNER=memory-approval \
+          EASYAI_DATA_DIR="$PWD/.tmp/smoke-data" \
+          EASYAI_SECRETS_FILE="$PWD/.tmp/smoke-secrets.json" \
+          EASYAI_WEB_STATIC_DIR="$PWD/apps/renderer/dist" \
+          node apps/api/dist/main.cjs > .tmp/web-runtime.log 2>&1 &
+          echo $! > .tmp/web-runtime.pid
+      - name: Wait for API health
+        shell: bash
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:4318/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat .tmp/web-runtime.log
+          exit 1
+      - name: Verify web index is served
+        run: curl -fsS http://127.0.0.1:4318/ > /tmp/easyai-index.html
+      - name: Run orchestration smoke
+        run: node scripts/headless-gateway-smoke.mjs
+      - name: Stop web runtime
+        if: always()
+        shell: bash
+        run: |
+          if [ -f .tmp/web-runtime.pid ]; then
+            kill "$(cat .tmp/web-runtime.pid)" || true
+          fi
+      - name: Validate root Dockerfile build
+        run: docker build --tag easyai-release:${{ github.sha }} .
+      - name: Print web runtime log on failure
+        if: failure()
+        run: cat .tmp/web-runtime.log
+
   package:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -74,7 +162,7 @@ jobs:
         # Artifact actions ignore dot-prefixed paths by default. Keep this
         # directory visible so the final installers are always discovered.
         run: node scripts/collect-release-artifacts.mjs apps/desktop/release release-assets-final ${{ matrix.expected_extension }}
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           # Do not upload mac/win/linux-unpacked directories: they contain the
@@ -86,7 +174,7 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v4
         with: { path: release-assets }
       - name: Prepare release assets and SHA-256 checksums
         shell: bash

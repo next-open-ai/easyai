@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue';
-import { streamChat, type RuntimeSkill, type ToolActivity, type ToolApproval, type SearchSource } from '../services/api.js';
+import { listSkillFiles, readSkillFile, streamChat, type RuntimeSkill, type ToolActivity, type ToolApproval, type SearchSource } from '../services/api.js';
 import * as orch from '../services/orchestration.js';
 import type { ProviderConfig } from './model-config.js';
 import { toModelPayload, useModelConfig } from './model-config.js';
@@ -453,11 +453,11 @@ export function useWorkspace() {
       let resources: RuntimeSkill['resources'] = [];
       if (skill.path) {
         try {
-          instructions = (await window.easyaiDesktop?.readSkillDraft(skill.path))?.content.slice(0, 24_000);
-          const files = await window.easyaiDesktop?.listSkillFiles(skill.path) ?? [];
+          instructions = (await readSkillFile(skill.path)).content.slice(0, 24_000);
+          const files = await listSkillFiles(skill.path);
           const readable = files.filter((file) => file.type === 'file' && file.relative !== 'SKILL.md' && /\.(md|txt|json|ya?ml)$/i.test(file.relative)).slice(0, 20);
           resources = (await Promise.all(readable.map(async (file) => {
-            try { const result = await window.easyaiDesktop?.readSkillFile(file.path); return result ? { path: file.relative, content: result.content.slice(0, 48_000) } : null; } catch { return null; }
+            try { const result = await readSkillFile(file.path); return result ? { path: file.relative, content: result.content.slice(0, 48_000) } : null; } catch { return null; }
           }))).filter((item): item is { path: string; content: string } => item !== null);
         } catch { /* Metadata-only Skills remain safely usable in the catalog. */ }
       } else if (skill.instructions) {

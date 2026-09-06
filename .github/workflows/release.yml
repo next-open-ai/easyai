@@ -203,6 +203,7 @@ jobs:
   publish_npm:
     needs: verify
     runs-on: ubuntu-latest
+    environment: npm
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }

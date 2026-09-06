@@ -5,7 +5,7 @@
   "description": "Cross-platform local AI workspace.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/next-open-ai/easyai.git"
+    "url": "https://github.com/next-open-ai/easyai.git"
   },
   "packageManager": "pnpm@10.20.0",
   "publishConfig": {

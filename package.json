@@ -1,6 +1,6 @@
 {
   "name": "@next-open-ai/easyai",
-  "version": "0.3.8",
+  "version": "0.3.12",
   "private": false,
   "description": "Cross-platform local AI workspace.",
   "repository": {

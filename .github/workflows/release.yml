@@ -225,4 +225,11 @@ jobs:
       - name: Build workspace for npm publish
         run: pnpm build
       - name: Publish scoped npm package via Trusted Publishing
-        run: npm publish --provenance
+        shell: bash
+        run: |
+          unset NODE_AUTH_TOKEN
+          unset NPM_TOKEN
+          npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ""
+          NPM_TOKEN: ""
